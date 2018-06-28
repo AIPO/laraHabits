@@ -3,50 +3,43 @@
 namespace App\Http\Controllers\api;
 
 use App\User;
+use Carbon\Carbon;
 use GuzzleHttp\Client;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
-    /**
-     * @param Request $request
-     * @return \Illuminate\Contracts\Routing\ResponseFactory|\Symfony\Component\HttpFoundation\Response
-     */
+
     public function register(Request $request)
     {
         $request->validate(
             [
-                'email' => 'required',
-                'name' => 'required',
-                'password' => 'required',
+                'email' => 'required|string|email|unique:users',
+                'name' => 'required|string',
+                'password' => 'required|string|confirmed',
             ]
         );
-        $user = new User();
-        $user->name = $request->name;
-        $user->email = $request->email;
-        $user->password = bcrypt($request->password);
+
+        $user = new User(
+            [
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => bcrypt($request->password),
+            ]
+        );
         $user->save();
 
-        $guzzle = new Client;
 
-        $response = $guzzle->post(
-            url('oauth/token'),
+        return response()->json(
             [
-                'form_params' => [
-                    'grant_type' => 'password',
-                    'client_id' => '2',
-                    'client_secret' => 'j5xPRWs5I5BOTWpY2aZa9uNERCmY8MKAraWeTEwR',
-                    'email' => $request->email,
-                    'password' => $request->password,
-                    'scope' => '*',
-                ],
-            ]
+                'message' => 'Successfully created a user!',
+            ],
+            201
         );
-
-        return response(['auth' => json_decode((string)$response->getBody(), true), 'user' => $user]);
     }
 
     public function login(Request $request)
@@ -55,13 +48,26 @@ class AuthController extends Controller
             [
                 'email' => 'required',
                 'password' => 'required',
+                'remember_me' => 'boolean',
             ]
         );
-        $user = User::where('email', $request->email)->first();
-        if (!$user) {
-            return new JsonResponse(['message' => 'User doesn\'t exist']);
+        $credentials = request(['email', 'password']);
+
+        if (Auth::attempt($credentials)) {
+            return response()->json(
+                [
+                    'message' => 'Unauthorized',
+                ]
+            );
         }
 
+        $user = $request->user();
+        $tokenResult = $user->createToken('Personal Access Token');
+        $token = $tokenResult->token;
+
+        if ($request->remember_me)
+            $token->expires_at = Carbon::now()->addWeeks(1);
+$token->save();
         if (Hash::check($request->password, $user->password)) {
             $guzzle = new Client;
 
@@ -79,7 +85,7 @@ class AuthController extends Controller
                 ]
             );
 
-            return json_decode((string) $response->getBody(), true);
+            return json_decode((string)$response->getBody(), true);
         } else {
             return new JsonResponse(['message' => 'User password is wrong.']);
         }
